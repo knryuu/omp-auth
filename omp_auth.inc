@@ -9,7 +9,7 @@
  *  let the rest of the implementation be handled internally 
  *  by this include! 
  *
- *  Copyright (C) <year>  <name of author>
+ *  Copyright (C) 2025  Kanaru Yuuki
  *
  *  This program is free software: you can redistribute it and/or modify
  *  it under the terms of the GNU Affero General Public License as published
@@ -25,9 +25,14 @@
  *  along with this program.  If not, see <https://www.gnu.org/licenses/>.
 */
 
+#if defined _inc_omp_auth
+    #endinput
+#endif
+
 #include <open.mp>
 #include <PawnPlus>
 #include <pp-mysql>
+#include <samp_bcrypt>
 
 static stock
     MySQL:Account_g_SqlHandle,
@@ -267,4 +272,21 @@ stock void:Account_Logout(playerid)
     Account_g_LoggedIn[playerid] = false;
     
     CallRemoteFunction("OnPlayerAccountLogout", "ii", playerid, id);
+}
+
+forward OnAccountVerifyPass__(playerid, success, Task:t);
+forward OnAccountHashedPass__(playerid, hashid, Task:t);
+
+public OnAccountVerifyPass__(playerid, success, Task:t)
+{
+    task_set_result(t, success);
+    return 0;
+}
+
+public OnAccountHashedPass__(playerid, hashid, Task:t)
+{
+    new hash[BCRYPT_HASH_LENGTH];
+    bcrypt_get_hash(hash);
+    task_set_result_arr(t, hash);
+    return 0;
 }
