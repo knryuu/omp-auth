@@ -4,6 +4,7 @@
 	"dependencies": [
 		"sampctl/samp-stdlib",
 		"IS4Code/PawnPlus:v1.5.1",
-		"AGraber/pawn-plus-mysql"
+		"AGraber/pawn-plus-mysql",
+		"Sreyas-Sreelal/samp-bcrypt:0.4.1"
 	]
 }
