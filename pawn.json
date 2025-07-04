@@ -1,0 +1,9 @@
+{
+	"user": "knryuu",
+	"repo": "omp-auth",
+	"dependencies": [
+		"sampctl/samp-stdlib",
+		"IS4Code/PawnPlus:v1.5.1",
+		"AGraber/pawn-plus-mysql"
+	]
+}
