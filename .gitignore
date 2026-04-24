@@ -1,0 +1,11 @@
+compiler/
+components/
+gamemodes/
+plugins/
+scriptfiles/
+*.json
+*.txt
+*.dll
+*.so
+*.exe
+*.pdb
