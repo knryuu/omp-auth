@@ -3,6 +3,8 @@ components/
 gamemodes/
 plugins/
 scriptfiles/
+logs/
+models/
 *.json
 *.txt
 *.dll
