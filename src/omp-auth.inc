@@ -1,3 +1,26 @@
+/*
+    omp-auth v0.0.5
+    Created with <3 by Kanaru Yuuki,
+
+    omp-auth is authentication system for your gamemodes so you can just ignore making the "login/register system" anymore. 
+    It supports both MySQL and SQLite connections, and it only requires your own connection handle instead of re-creating new handle. 
+    The password is protected using Bcrypt Algorithm from SyS, so you don't have to worry about password security.
+
+    Copyright (C) 2026 Kanaru Yuuki
+
+    This program is free software: you can redistribute it and/or modify
+    it under the terms of the GNU General Public License as published by
+    the Free Software Foundation, either version 3 of the License, or
+    (at your option) any later version.
+
+    This program is distributed in the hope that it will be useful,
+    but WITHOUT ANY WARRANTY; without even the implied warranty of
+    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+    GNU General Public License for more details.
+
+    You should have received a copy of the GNU General Public License
+    along with this program.  If not, see <https://www.gnu.org/licenses/>.
+*/
 
 #include <samp_bcrypt>
 
@@ -119,6 +142,88 @@ stock bool:Auth_LoadUserData(playerid)
     }
 
     return false;
+}
+
+stock Auth_ShowLoginDialog(playerid, const title[], const body[], const button1[], const button2[], OPEN_MP_TAGS:...)
+{
+    const static_args = 5;
+    const args_diff = (3 - static_args) * 4;
+
+    static args;
+    args = numargs();
+
+    static str[2048];
+    const str_size = sizeof(str);
+
+    if (args > static_args)
+    {
+
+        while (--args >= static_args)
+        {
+            #emit LCTRL 5
+            #emit LOAD.alt args
+            #emit SHL.C.alt 2
+            #emit ADD.C 12
+            #emit ADD
+            #emit LOAD.I
+            #emit PUSH.pri
+        }
+
+        #emit PUSH.S body
+        #emit PUSH.C str_size
+        #emit PUSH.C str
+        #emit LOAD.S.pri 8
+        #emit ADD.C args_diff
+        #emit PUSH.pri
+        #emit SYSREQ.C format
+        #emit LCTRL 5
+        #emit SCTRL 4
+
+        return ShowPlayerDialog(playerid, OMP_AUTH_DIALOG_ID, DIALOG_STYLE_PASSWORD, title, str, button1, button2);
+    }
+    
+    return ShowPlayerDialog(playerid, OMP_AUTH_DIALOG_ID, DIALOG_STYLE_PASSWORD, title, body, button1, button2);
+}
+
+stock Auth_ShowRegisterDialog(playerid, const title[], const body[], const button1[], const button2[], OPEN_MP_TAGS:...)
+{
+    const static_args = 5;
+    const args_diff = (3 - static_args) * 4;
+
+    static args;
+    args = numargs();
+
+    static str[2048];
+    const str_size = sizeof(str);
+
+    if (args > static_args)
+    {
+
+        while (--args >= static_args)
+        {
+            #emit LCTRL 5
+            #emit LOAD.alt args
+            #emit SHL.C.alt 2
+            #emit ADD.C 12
+            #emit ADD
+            #emit LOAD.I
+            #emit PUSH.pri
+        }
+
+        #emit PUSH.S body
+        #emit PUSH.C str_size
+        #emit PUSH.C str
+        #emit LOAD.S.pri 8
+        #emit ADD.C args_diff
+        #emit PUSH.pri
+        #emit SYSREQ.C format
+        #emit LCTRL 5
+        #emit SCTRL 4
+
+        return ShowPlayerDialog(playerid, OMP_AUTH_DIALOG_ID + 1, DIALOG_STYLE_PASSWORD, title, str, button1, button2);
+    }
+    
+    return ShowPlayerDialog(playerid, OMP_AUTH_DIALOG_ID + 1, DIALOG_STYLE_PASSWORD, title, body, button1, button2);
 }
 
 static stock Auth_handleMySQL(MySQL:connection, const table[], const idField[], const userNameField[], const passwordField[])
