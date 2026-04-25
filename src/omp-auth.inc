@@ -1,6 +1,6 @@
 /*
     omp-auth v0.0.5
-    Created with <3 by Kanaru Yuuki,
+    Created with <3 by Kanaru Yuuki.
 
     omp-auth is authentication system for your gamemodes so you can just ignore making the "login/register system" anymore. 
     It supports both MySQL and SQLite connections, and it only requires your own connection handle instead of re-creating new handle. 
