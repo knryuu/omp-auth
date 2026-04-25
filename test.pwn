@@ -29,15 +29,22 @@ public OnPlayerConnect(playerid)
     return 1;
 }
 
-public OnUserAuthDataLoaded(playerid, bool:loaded)
+public OnUserAuthDataLoaded(playerid, uid)
 {
-    if (!loaded)
+    if (!uid)
     {
         SendClientMessage(playerid, 0xFFFFFFAA, "Your account is not exists in our database!");
+        Auth_ShowRegisterDialog(playerid, "{FFFFFF}Register Dialog", "{FFFFFF}Welcome! Please insert password below to yap", "Login", "Exit");
     }
     else
     {
         SendClientMessage(playerid, 0xFFFFFFAA, "Your account exists!");
     }
+    return 1;
+}
+
+public OnAuthUserRegistered(playerid, uid)
+{
+    SendClientMessage(playerid, 0xFFFFFFAA, "User registered (UID: %d)", uid);
     return 1;
 }

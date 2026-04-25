@@ -1,10 +1,13 @@
 /*
-    omp-auth v0.0.5
-    Created with <3 by Kanaru Yuuki.
+    omp-auth v0.0.10-a1
+    Created with <3 by knryuu.
 
-    omp-auth is authentication system for your gamemodes so you can just ignore making the "login/register system" anymore. 
-    It supports both MySQL and SQLite connections, and it only requires your own connection handle instead of re-creating new handle. 
-    The password is protected using Bcrypt Algorithm from SyS, so you don't have to worry about password security.
+    omp-auth is authentication system for your gamemodes so you can 
+    just ignore making the "login/register system" anymore. It supports 
+    both MySQL and SQLite connections, and it only requires your own 
+    connection handle instead of re-creating new handle. The password 
+    is protected using Bcrypt Algorithm from SyS, so you don't have to 
+    worry about password security.
 
     Copyright (C) 2026 Kanaru Yuuki
 
@@ -54,12 +57,17 @@ static stock
 // User Cache
 static stock
     Auth_g_sPlayerID[MAX_PLAYERS],
-    Auth_g_sPlayerUserName[MAX_PLAYERS][MAX_PLAYER_NAME],
+    Auth_g_sPlayerUserName[MAX_PLAYERS][MAX_PLAYER_NAME + 1],
     Auth_g_sPlayerPassword[MAX_PLAYERS][BCRYPT_HASH_LENGTH];
 
 // States
 static stock
-    bool:Account_g_sUserDataLoaded[MAX_PLAYERS];
+    bool:Auth_g_sUserDataLoaded[MAX_PLAYERS];
+
+// Forward Internal
+forward Auth_OnLoadUser__(playerid);
+forward Auth_OnPrepareRegister__(playerid, hashid);
+forward Auth_OnRegisterUser__(playerid);
 
 stock bool:Auth_Init({MySQL, DB}:connection, const table[] = "accounts", const idField[] = "id", const userNameField[] = "Username", const passwordField[] = "Password", tag = tagof(connection))
 {
@@ -101,7 +109,7 @@ stock bool:Auth_Init({MySQL, DB}:connection, const table[] = "accounts", const i
 
 stock bool:Auth_IsUserDataLoaded(playerid)
 {
-    return (IsPlayerConnected(playerid) && Account_g_sUserDataLoaded[playerid] == true);
+    return (IsPlayerConnected(playerid) && Auth_g_sUserDataLoaded[playerid] == true);
 }
 
 stock bool:Auth_LoadUserData(playerid)
@@ -113,30 +121,29 @@ stock bool:Auth_LoadUserData(playerid)
     {
         new queryFormat[OMP_AUTH_BUFFER_SIZE];
         mysql_format(Auth_g_sMySQLConn, queryFormat, sizeof(queryFormat), "SELECT %s, %s, %s FROM %s WHERE %s = '%e' LIMIT 1", Auth_g_sIDField, Auth_g_sUserNameField, Auth_g_sPasswordField, Auth_g_sTableName, Auth_g_sUserNameField, playerName);
-        mysql_tquery(Auth_g_sMySQLConn, queryFormat, #Auth_OnAuthLoadUser__, "i", playerid);
+        mysql_tquery(Auth_g_sMySQLConn, queryFormat, #Auth_OnLoadUser__, "i", playerid);
         return true;
     }
     else 
     {
-        new DBResult:result = DB_ExecuteQuery(Auth_g_sSQLiteConn, "SELECT %s, %s, %s FROM %s WHERE %s = '%e' LIMIT 1", Auth_g_sIDField, Auth_g_sUserNameField, Auth_g_sPasswordField, Auth_g_sTableName, Auth_g_sUserNameField, playerName);
+        new DBResult:result = DB_ExecuteQuery(Auth_g_sSQLiteConn, "SELECT %s, %s, %s FROM %s WHERE %s = '%q' LIMIT 1", Auth_g_sIDField, Auth_g_sUserNameField, Auth_g_sPasswordField, Auth_g_sTableName, Auth_g_sUserNameField, playerName);
         
         if (result)
         {
             if (!DB_GetRowCount(result))
             {
-                Account_g_sUserDataLoaded[playerid] = false;
-                CallRemoteFunction(#OnUserAuthDataLoaded, "ii", playerid, false);
+                Auth_g_sUserDataLoaded[playerid] = false;
+                CallRemoteFunction(#OnUserAuthDataLoaded, "ii", playerid, 0);
                 return true;
             }
 
             Auth_g_sPlayerID[playerid] = DB_GetFieldInt(result, 0);
-
             DB_GetFieldString(result, 1, Auth_g_sPlayerUserName[playerid], MAX_PLAYER_NAME);
             DB_GetFieldString(result, 2, Auth_g_sPlayerPassword[playerid], BCRYPT_HASH_LENGTH);
             DB_FreeResultSet(result);
 
-            Account_g_sUserDataLoaded[playerid] = true;
-            CallRemoteFunction(#OnUserAuthDataLoaded, "ii", playerid, true);
+            Auth_g_sUserDataLoaded[playerid] = true;
+            CallRemoteFunction(#OnUserAuthDataLoaded, "ii", playerid, Auth_g_sPlayerID[playerid]);
             return true;
         }
     }
@@ -224,6 +231,19 @@ stock Auth_ShowRegisterDialog(playerid, const title[], const body[], const butto
     }
     
     return ShowPlayerDialog(playerid, OMP_AUTH_DIALOG_ID + 1, DIALOG_STYLE_PASSWORD, title, body, button1, button2);
+}
+
+// Our reset state
+stock Auth_ResetData(playerid)
+{
+    new uid = Auth_g_sPlayerID[playerid] = 0;
+    
+    Auth_MemSet(Auth_g_sPlayerUserName[playerid], 0, sizeof(Auth_g_sPlayerUserName[]));
+    Auth_MemSet(Auth_g_sPlayerPassword[playerid], 0, sizeof(Auth_g_sPlayerPassword[]));
+    Auth_g_sUserDataLoaded[playerid] = false;
+
+    CallRemoteFunction(#OnUserAuthResetData, "ii", playerid, uid);
+    return 1;
 }
 
 static stock Auth_handleMySQL(MySQL:connection, const table[], const idField[], const userNameField[], const passwordField[])
@@ -404,16 +424,15 @@ static stock Auth_HandleSQLite(DB:connection, const table[], const idField[], co
     }
 }
 
-forward Auth_OnAuthLoadUser__(playerid);
-public Auth_OnAuthLoadUser__(playerid)
+public Auth_OnLoadUser__(playerid)
 {
     new rows;
     cache_get_row_count(rows);
 
     if (!rows)
     {
-        Account_g_sUserDataLoaded[playerid] = false;
-        CallRemoteFunction(#OnUserAuthDataLoaded, "ii", playerid, false);
+        Auth_g_sUserDataLoaded[playerid] = false;
+        CallRemoteFunction(#OnUserAuthDataLoaded, "ii", playerid, 0);
         return 0;
     }
 
@@ -422,11 +441,277 @@ public Auth_OnAuthLoadUser__(playerid)
     cache_get_value_index(0, 2, Auth_g_sPlayerPassword[playerid], BCRYPT_HASH_LENGTH);
     cache_unset_active();
 
-    Account_g_sUserDataLoaded[playerid] = true;
-    CallRemoteFunction(#OnUserAuthDataLoaded, "ii", playerid, true);
+    Auth_g_sUserDataLoaded[playerid] = true;
+    CallRemoteFunction(#OnUserAuthDataLoaded, "ii", playerid, Auth_g_sPlayerID[playerid]);
     return 1;
 }
 
+public Auth_OnPrepareRegister__(playerid, hashid)
+{
+    bcrypt_get_hash(Auth_g_sPlayerPassword[playerid], BCRYPT_HASH_LENGTH);
+    GetPlayerName(playerid, Auth_g_sPlayerUserName[playerid], MAX_PLAYER_NAME);
+
+    if (Auth_g_sConnType == 1)
+    {
+        new queryFormat[OMP_AUTH_BUFFER_SIZE];
+        mysql_format(Auth_g_sMySQLConn, queryFormat, sizeof(queryFormat), "INSERT INTO %s (%s, %s) VALUES ('%e', '%e')", Auth_g_sTableName, Auth_g_sUserNameField, Auth_g_sPasswordField, Auth_g_sPlayerUserName[playerid], Auth_g_sPlayerPassword[playerid]);
+        mysql_tquery(Auth_g_sMySQLConn, queryFormat, #Auth_OnRegisterUser__, "i", playerid);
+    }
+    else
+    {
+        new DBResult:result = DB_ExecuteQuery(Auth_g_sSQLiteConn, "INSERT INTO %s (%s, %s) VALUES ('%q', '%q')", Auth_g_sTableName, Auth_g_sUserNameField, Auth_g_sPasswordField, Auth_g_sPlayerUserName[playerid], Auth_g_sPlayerPassword[playerid]);
+        
+        if (result)
+        {
+            Auth_g_sPlayerID[playerid] = Auth_GetSQLiteLastInsertID();
+            DB_FreeResultSet(result);
+
+            CallRemoteFunction(#OnAuthUserRegistered, "ii", playerid, Auth_g_sPlayerID[playerid]);
+        }
+        else
+        {
+            printf("[omp-auth error]: Failed to insert user data to %s", Auth_g_sTableName);
+            CallRemoteFunction(#OnAuthUserRegistered, "ii", playerid, 0);
+        }
+    }
+
+    return 1;
+}
+
+public Auth_OnRegisterUser__(playerid)
+{
+    Auth_g_sPlayerID[playerid] = cache_insert_id();
+    CallRemoteFunction(#OnAuthUserRegistered, "ii", playerid, Auth_g_sPlayerID[playerid]);
+    return 1;
+}
+
+public OnDialogResponse(playerid, dialogid, response, listitem, inputtext[])
+{
+    if (dialogid == OMP_AUTH_DIALOG_ID+1)
+    {
+        if (!response)
+        {
+            Auth_ResetData(playerid);
+            Kick(playerid);
+            return 1;
+        }
+
+        bcrypt_hash(playerid, #Auth_OnPrepareRegister__, inputtext, BCRYPT_COST);
+        return 1;        
+    }
+
+
+    #if defined AU_OnDialogResponse
+        return AU_OnDialogResponse(playerid, dialogid, response, listitem, inputtext);
+    #else
+        return 0;
+    #endif
+}
+
+
+// Internal functions for various reasons.
+static stock Auth_MemSet(variable[], cells, value) 
+{
+    new address;
+    
+    #emit LOAD.S.pri  variable
+    #emit STOR.S.pri  address
+    
+    Auth_RawMemSet(address, cells, value);
+}
+
+static stock Auth_RawMemSet(address, cells, value) 
+{
+    new param_adr;
+    
+    #emit LCTRL       6
+    #emit MOVE.alt
+    #emit LCTRL       0
+    #emit ADD
+    #emit MOVE.alt
+    #emit LCTRL       1
+    #emit SUB.alt
+    #emit ADD.C       92
+    #emit STOR.S.pri  param_adr
+    #emit LOAD.S.pri  cells
+    #emit SHL.C.pri   2
+    #emit SREF.S.pri  param_adr
+    
+    #emit LOAD.S.alt  address
+    #emit LOAD.S.pri  value
+    #emit FILL        0
+}
+
+static enum {
+	SQLITE_LIMIT_LENGTH,
+	SQLITE_LIMIT_SQL_LENGTH,
+	SQLITE_LIMIT_COLUMN,
+	SQLITE_LIMIT_EXPR_DEPTH,
+	SQLITE_LIMIT_COMPOUND_SELECT,
+	SQLITE_LIMIT_VDBE_OP,
+	SQLITE_LIMIT_FUNCTION_ARG,
+	SQLITE_LIMIT_ATTACHED,
+	SQLITE_LIMIT_LIKE_PATTERN_LEN,
+	SQLITE_LIMIT_VARIABLE_NUMBER,
+
+	SQLITE_LIMIT_TRIGGER_DEPTH
+};
+
+static enum 
+    e_SQLITE3 { // SQLite 3 C-struct offsets
+	     sqlite3_pVfs                [4],
+	     sqlite3_iBackends           [4],
+	     sqlite3_pBackends           [4],
+	     sqlite3_iFlags              [4],
+	     sqlite3_iOpenFlags          [4],
+	
+	     sqlite3_iErrorCode          [4],
+	     sqlite3_iErrorMask          [4],
+	bool:sqlite3_bAutoCommit         [1],
+	     sqlite3_iTempStore          [1],
+	bool:sqlite3_bMallocFailed       [1],
+	
+	     sqlite3_iDefaultLockMode    [1],
+	     sqlite3_iNextAutovac        [1],
+	bool:sqlite3_bSuppressErrors     [1],
+	     sqlite3_iPad                [2],
+	
+	     sqlite3_iNextPagesize       [4],
+	     sqlite3_iNumTables          [4],
+	     sqlite3_pDefaultCollation   [4],
+	     sqlite3_iLastRowid          [4],
+	     sqlite3_iLastRowidUpperBytes[4],
+	     sqlite3_iMagic              [4],
+	     sqlite3_iNumChanges         [4],
+	     sqlite3_iNumTotalChanges    [4],
+	
+	     sqlite3_aiLimits            [SQLITE_LIMIT_TRIGGER_DEPTH * 4],
+	
+	     sqlite3_aInitInfo           [12],
+	     sqlite3_iNumExtensions      [4],
+	     sqlite3_pExtensions         [4],
+	     sqlite3_pVdbe               [4],
+	     sqlite3_iActiveVdbeCount    [4],
+	     sqlite3_iWritingVdbeCount   [4],
+	
+	     sqlite3_pTraceFunc          [4],
+	     sqlite3_pTraceArg           [4],
+	     sqlite3_pProfilingFunc      [4],
+	     sqlite3_pProfilingArg       [4],
+	     sqlite3_pCommitArg          [4],
+	     sqlite3_pCommitCallback     [4],
+	     sqlite3_pRollbackArg        [4],
+	     sqlite3_pRollbackCallback   [4],
+	     sqlite3_pUpdateArg          [4],
+	     sqlite3_pUpdateCallback     [4],
+	     sqlite3_pWalCallback        [4],
+	     sqlite3_pWalArg             [4],
+	     sqlite3_pCollNeeded         [4],
+	     sqlite3_pCollNeeded16       [4],
+	     sqlite3_pCollNeededArg      [4],
+	     sqlite3_pError              [4],
+	     sqlite3_pErrorMsg           [4],
+	     sqlite3_pErrorMsg16         [4]
+};
+
+static stock Auth_GetSQLiteLastInsertID()
+{
+    if (!Auth_g_sSQLiteConn)
+        return 0;
+
+    return Auth_GetSQLiteStructInfo(Auth_g_sSQLiteConn, sqlite3_iLastRowid);
+}
+
+static stock Auth_GetSQLiteStructInfo(DB:db, {_, e_SQLITE3}:iOffset)
+{
+	new
+		iAddress = DB_GetMemHandle(db & DB:0x7FFFFFFF) - Auth_GetAmxBaseRelative() + iOffset,
+		iValue
+	;
+	
+	#emit LREF.S.pri  iAddress
+	#emit STOR.S.pri  iValue
+	
+	return iValue;
+}
+
+static stock Auth_GetAmxBaseRelative() 
+{
+	static
+		s_iAmxBaseRelative = 0
+	;
+	
+	if (!s_iAmxBaseRelative) 
+    {
+		s_iAmxBaseRelative = Auth_GetAmxBase();
+
+		#emit LCTRL     1
+		#emit LOAD.alt  s_iAmxBaseRelative
+		#emit ADD
+		#emit STOR.pri  s_iAmxBaseRelative
+	}
+	
+	return s_iAmxBaseRelative;
+}
+
+// By Zeex!
+// Returns the AMX base address i.e. amx->base.
+static stock Auth_Dummy() 
+{
+	return 0;
+}
+
+static stock Auth_GetAmxBase() 
+{
+	static amx_base = 0; // cached
+
+	if (amx_base == 0) 
+    {
+		new cod, dat;
+		#emit lctrl 0
+		#emit stor.s.pri cod
+		#emit lctrl 1
+		#emit stor.s.pri dat
+
+		// Get code section start address relative to data.
+		new code_start = cod - dat;
+
+		// Get address of Auth_Dummy().
+		new fn_addr;
+		#emit const.pri Auth_Dummy
+		#emit stor.s.pri fn_addr
+
+		// Get absolute address from the CALL instruction.
+		new fn_addr_reloc, call_addr;
+		Auth_Dummy();
+		#emit lctrl 6
+		#emit stor.s.pri call_addr
+		call_addr = call_addr - 12 + code_start;
+		#emit lref.s.pri call_addr
+		#emit stor.s.pri fn_addr_reloc
+
+		amx_base = fn_addr_reloc - fn_addr - cod;
+	}
+
+	return amx_base;
+}
+
+#if defined _ALS_OnDialogResponse
+    #undef OnDialogResponse
+#else
+    #define _ALS_OnDialogResponse
+#endif
+
+#define OnDialogResponse AU_OnDialogResponse
+
 #if defined OnUserAuthDataLoaded
-    forward OnUserAuthDataLoaded(playerid, bool:loaded);
+    forward OnUserAuthDataLoaded(playerid, uid);
+#endif
+
+#if defined OnUserAuthResetData
+    forward OnUserAuthResetData(playerid, uid);
+#endif
+
+#if defined OnAuthUserRegistered
+    forward OnAuthUserRegistered(playerid, uid);
 #endif
