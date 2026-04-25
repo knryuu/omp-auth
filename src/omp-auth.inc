@@ -13,6 +13,8 @@
     #define OMP_AUTH_BUFFER_SIZE 512
 #endif
 
+static stock const OMP_AUTH_DIALOG_ID = 0x412B; // A+
+
 // Connection
 static stock
     Auth_g_sConnType,
@@ -25,6 +27,16 @@ static stock
     Auth_g_sIDField[128],
     Auth_g_sUserNameField[128],
     Auth_g_sPasswordField[128];
+
+// User Cache
+static stock
+    Auth_g_sPlayerID[MAX_PLAYERS],
+    Auth_g_sPlayerUserName[MAX_PLAYERS][MAX_PLAYER_NAME],
+    Auth_g_sPlayerPassword[MAX_PLAYERS][BCRYPT_HASH_LENGTH];
+
+// States
+static stock
+    bool:Account_g_sUserDataLoaded[MAX_PLAYERS];
 
 stock bool:Auth_Init({MySQL, DB}:connection, const table[] = "accounts", const idField[] = "id", const userNameField[] = "Username", const passwordField[] = "Password", tag = tagof(connection))
 {
@@ -59,6 +71,51 @@ stock bool:Auth_Init({MySQL, DB}:connection, const table[] = "accounts", const i
 
         Auth_HandleSQLite(DB:connection, table, idField, userNameField, passwordField);
         return true;
+    }
+
+    return false;
+}
+
+stock bool:Auth_IsUserDataLoaded(playerid)
+{
+    return (IsPlayerConnected(playerid) && Account_g_sUserDataLoaded[playerid] == true);
+}
+
+stock bool:Auth_LoadUserData(playerid)
+{
+    new playerName[MAX_PLAYER_NAME];
+    GetPlayerName(playerid, playerName, sizeof(playerName));
+
+    if (Auth_g_sConnType == 1)
+    {
+        new queryFormat[OMP_AUTH_BUFFER_SIZE];
+        mysql_format(Auth_g_sMySQLConn, queryFormat, sizeof(queryFormat), "SELECT %s, %s, %s FROM %s WHERE %s = '%e' LIMIT 1", Auth_g_sIDField, Auth_g_sUserNameField, Auth_g_sPasswordField, Auth_g_sTableName, Auth_g_sUserNameField, playerName);
+        mysql_tquery(Auth_g_sMySQLConn, queryFormat, #Auth_OnAuthLoadUser__, "i", playerid);
+        return true;
+    }
+    else 
+    {
+        new DBResult:result = DB_ExecuteQuery(Auth_g_sSQLiteConn, "SELECT %s, %s, %s FROM %s WHERE %s = '%e' LIMIT 1", Auth_g_sIDField, Auth_g_sUserNameField, Auth_g_sPasswordField, Auth_g_sTableName, Auth_g_sUserNameField, playerName);
+        
+        if (result)
+        {
+            if (!DB_GetRowCount(result))
+            {
+                Account_g_sUserDataLoaded[playerid] = false;
+                CallRemoteFunction(#OnUserAuthDataLoaded, "ii", playerid, false);
+                return true;
+            }
+
+            Auth_g_sPlayerID[playerid] = DB_GetFieldInt(result, 0);
+
+            DB_GetFieldString(result, 1, Auth_g_sPlayerUserName[playerid], MAX_PLAYER_NAME);
+            DB_GetFieldString(result, 2, Auth_g_sPlayerPassword[playerid], BCRYPT_HASH_LENGTH);
+            DB_FreeResultSet(result);
+
+            Account_g_sUserDataLoaded[playerid] = true;
+            CallRemoteFunction(#OnUserAuthDataLoaded, "ii", playerid, true);
+            return true;
+        }
     }
 
     return false;
@@ -123,8 +180,6 @@ static stock Auth_handleMySQL(MySQL:connection, const table[], const idField[], 
                 printf("[omp-auth error]: Failed to initialize id field (%s) in %s!", idField, table);
                 return;
             }
-
-            strcopy(Auth_g_sIDField, idField, sizeof(Auth_g_sIDField));
         }
 
         if (!foundNameField)
@@ -137,8 +192,6 @@ static stock Auth_handleMySQL(MySQL:connection, const table[], const idField[], 
                 printf("[omp-auth error]: Failed to initialize id field (%s) in %s!", userNameField, table);
                 return;
             }
-
-            strcopy(Auth_g_sUserNameField, userNameField, sizeof(Auth_g_sUserNameField));
         }
 
         if (!foundPasswordField)
@@ -151,11 +204,13 @@ static stock Auth_handleMySQL(MySQL:connection, const table[], const idField[], 
                 printf("[omp-auth error]: Failed to initialize id field (%s) in %s!", passwordField, table);
                 return;
             }
-
-            strcopy(Auth_g_sPasswordField, passwordField, sizeof(Auth_g_sPasswordField));
         }
         
+        // Copy everything.
         strcopy(Auth_g_sTableName, table, sizeof(Auth_g_sTableName));
+        strcopy(Auth_g_sIDField, idField, sizeof(Auth_g_sIDField));
+        strcopy(Auth_g_sUserNameField, userNameField, sizeof(Auth_g_sUserNameField));
+        strcopy(Auth_g_sPasswordField, passwordField, sizeof(Auth_g_sPasswordField));
     }
 }
 
@@ -211,8 +266,6 @@ static stock Auth_HandleSQLite(DB:connection, const table[], const idField[], co
                 printf("[omp-auth error]: Failed to initialize id field (%s) in %s!", idField, table);
                 return;
             }
-
-            strcopy(Auth_g_sIDField, idField, sizeof(Auth_g_sIDField));
         }
 
 
@@ -225,8 +278,6 @@ static stock Auth_HandleSQLite(DB:connection, const table[], const idField[], co
                 printf("[omp-auth error]: Failed to initialize username field (%s) in %s!", userNameField, table);
                 return;
             }
-            
-            strcopy(Auth_g_sUserNameField, userNameField, sizeof(Auth_g_sUserNameField));
         }
 
         if (!foundPasswordField)
@@ -238,10 +289,39 @@ static stock Auth_HandleSQLite(DB:connection, const table[], const idField[], co
                 printf("[omp-auth error]: Failed to initialize password field (%s) in %s!", passwordField, table);
                 return;
             }
-            
-            strcopy(Auth_g_sPasswordField, passwordField, sizeof(Auth_g_sPasswordField));
         }
 
+        // Copy everything.
         strcopy(Auth_g_sTableName, table, sizeof(Auth_g_sTableName));
+        strcopy(Auth_g_sIDField, idField, sizeof(Auth_g_sIDField));
+        strcopy(Auth_g_sUserNameField, userNameField, sizeof(Auth_g_sUserNameField));
+        strcopy(Auth_g_sPasswordField, passwordField, sizeof(Auth_g_sPasswordField));
     }
 }
+
+forward Auth_OnAuthLoadUser__(playerid);
+public Auth_OnAuthLoadUser__(playerid)
+{
+    new rows;
+    cache_get_row_count(rows);
+
+    if (!rows)
+    {
+        Account_g_sUserDataLoaded[playerid] = false;
+        CallRemoteFunction(#OnUserAuthDataLoaded, "ii", playerid, false);
+        return 0;
+    }
+
+    cache_get_value_index_int(0, 0, Auth_g_sPlayerID[playerid]);
+    cache_get_value_index(0, 1, Auth_g_sPlayerUserName[playerid], MAX_PLAYER_NAME);
+    cache_get_value_index(0, 2, Auth_g_sPlayerPassword[playerid], BCRYPT_HASH_LENGTH);
+    cache_unset_active();
+
+    Account_g_sUserDataLoaded[playerid] = true;
+    CallRemoteFunction(#OnUserAuthDataLoaded, "ii", playerid, true);
+    return 1;
+}
+
+#if defined OnUserAuthDataLoaded
+    forward OnUserAuthDataLoaded(playerid, bool:loaded);
+#endif
