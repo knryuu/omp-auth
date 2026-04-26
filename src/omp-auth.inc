@@ -1,5 +1,5 @@
 /*
-    omp-auth v0.0.10-a1
+    omp-auth v0.1.0-rc
     Created with <3 by knryuu.
 
     omp-auth is authentication system for your gamemodes so you can 
