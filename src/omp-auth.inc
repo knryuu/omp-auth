@@ -522,6 +522,7 @@ public Auth_OnLoadUser__(playerid)
 
 public Auth_OnPrepareRegister__(playerid, hashid)
 {
+    Auth_g_sUserDataLoaded[playerid] = true;
     bcrypt_get_hash(Auth_g_sPlayerPassword[playerid], BCRYPT_HASH_LENGTH);
     GetPlayerName(playerid, Auth_g_sPlayerUserName[playerid], MAX_PLAYER_NAME);
 
@@ -544,6 +545,7 @@ public Auth_OnPrepareRegister__(playerid, hashid)
         }
         else
         {
+            Auth_ResetData(playerid);
             printf("[omp-auth error]: Failed to insert user data to %s", Auth_g_sTableName);
             CallRemoteFunction(#OnAuthUserRegistered, "ii", playerid, 0);
         }
@@ -587,7 +589,7 @@ public OnDialogResponse(playerid, dialogid, response, listitem, inputtext[])
 
         if (IS_NULL(inputtext))
         {
-            CallRemoteFunction(#OnAuthUserRegistered, "ii", playerid, OMP_AUTH_STRING_NULL);
+            CallRemoteFunction(#OnAuthUserLogin, "ii", playerid, OMP_AUTH_STRING_NULL);
             return 1;
         }
 
@@ -629,6 +631,18 @@ public OnDialogResponse(playerid, dialogid, response, listitem, inputtext[])
 }
 
 // Deep Internal functions for various reasons
+static stock Auth_GetSQLiteLastInsertID()
+{
+    new 
+        DBResult:result = DB_ExecuteQuery(Auth_g_sSQLiteConn, "SELECT last_insert_rowid()"),
+        ret;
+    
+    ret = DB_GetFieldInt(result, 0);
+    DB_FreeResultSet(result);
+    return ret;
+}
+
+
 static stock Auth_MemSet(variable[], cells, value) 
 {
     new address;
@@ -659,160 +673,6 @@ static stock Auth_RawMemSet(address, cells, value)
     #emit LOAD.S.alt  address
     #emit LOAD.S.pri  value
     #emit FILL        0
-}
-
-static enum {
-	SQLITE_LIMIT_LENGTH,
-	SQLITE_LIMIT_SQL_LENGTH,
-	SQLITE_LIMIT_COLUMN,
-	SQLITE_LIMIT_EXPR_DEPTH,
-	SQLITE_LIMIT_COMPOUND_SELECT,
-	SQLITE_LIMIT_VDBE_OP,
-	SQLITE_LIMIT_FUNCTION_ARG,
-	SQLITE_LIMIT_ATTACHED,
-	SQLITE_LIMIT_LIKE_PATTERN_LEN,
-	SQLITE_LIMIT_VARIABLE_NUMBER,
-
-	SQLITE_LIMIT_TRIGGER_DEPTH
-};
-
-static enum 
-    e_SQLITE3 { // SQLite 3 C-struct offsets
-	     sqlite3_pVfs                [4],
-	     sqlite3_iBackends           [4],
-	     sqlite3_pBackends           [4],
-	     sqlite3_iFlags              [4],
-	     sqlite3_iOpenFlags          [4],
-	
-	     sqlite3_iErrorCode          [4],
-	     sqlite3_iErrorMask          [4],
-	bool:sqlite3_bAutoCommit         [1],
-	     sqlite3_iTempStore          [1],
-	bool:sqlite3_bMallocFailed       [1],
-	
-	     sqlite3_iDefaultLockMode    [1],
-	     sqlite3_iNextAutovac        [1],
-	bool:sqlite3_bSuppressErrors     [1],
-	     sqlite3_iPad                [2],
-	
-	     sqlite3_iNextPagesize       [4],
-	     sqlite3_iNumTables          [4],
-	     sqlite3_pDefaultCollation   [4],
-	     sqlite3_iLastRowid          [4],
-	     sqlite3_iLastRowidUpperBytes[4],
-	     sqlite3_iMagic              [4],
-	     sqlite3_iNumChanges         [4],
-	     sqlite3_iNumTotalChanges    [4],
-	
-	     sqlite3_aiLimits            [SQLITE_LIMIT_TRIGGER_DEPTH * 4],
-	
-	     sqlite3_aInitInfo           [12],
-	     sqlite3_iNumExtensions      [4],
-	     sqlite3_pExtensions         [4],
-	     sqlite3_pVdbe               [4],
-	     sqlite3_iActiveVdbeCount    [4],
-	     sqlite3_iWritingVdbeCount   [4],
-	
-	     sqlite3_pTraceFunc          [4],
-	     sqlite3_pTraceArg           [4],
-	     sqlite3_pProfilingFunc      [4],
-	     sqlite3_pProfilingArg       [4],
-	     sqlite3_pCommitArg          [4],
-	     sqlite3_pCommitCallback     [4],
-	     sqlite3_pRollbackArg        [4],
-	     sqlite3_pRollbackCallback   [4],
-	     sqlite3_pUpdateArg          [4],
-	     sqlite3_pUpdateCallback     [4],
-	     sqlite3_pWalCallback        [4],
-	     sqlite3_pWalArg             [4],
-	     sqlite3_pCollNeeded         [4],
-	     sqlite3_pCollNeeded16       [4],
-	     sqlite3_pCollNeededArg      [4],
-	     sqlite3_pError              [4],
-	     sqlite3_pErrorMsg           [4],
-	     sqlite3_pErrorMsg16         [4]
-};
-
-static stock Auth_GetSQLiteLastInsertID()
-{
-    if (!Auth_g_sSQLiteConn)
-        return 0;
-
-    return Auth_GetSQLiteStructInfo(Auth_g_sSQLiteConn, sqlite3_iLastRowid);
-}
-
-static stock Auth_GetSQLiteStructInfo(DB:db, {_, e_SQLITE3}:iOffset)
-{
-	new
-		iAddress = DB_GetMemHandle(db & DB:0x7FFFFFFF) - Auth_GetAmxBaseRelative() + iOffset,
-		iValue
-	;
-	
-	#emit LREF.S.pri  iAddress
-	#emit STOR.S.pri  iValue
-	
-	return iValue;
-}
-
-static stock Auth_GetAmxBaseRelative() 
-{
-	static
-		s_iAmxBaseRelative = 0
-	;
-	
-	if (!s_iAmxBaseRelative) 
-    {
-		s_iAmxBaseRelative = Auth_GetAmxBase();
-
-		#emit LCTRL     1
-		#emit LOAD.alt  s_iAmxBaseRelative
-		#emit ADD
-		#emit STOR.pri  s_iAmxBaseRelative
-	}
-	
-	return s_iAmxBaseRelative;
-}
-
-// By Zeex!
-// Returns the AMX base address i.e. amx->base.
-static stock Auth_Dummy() 
-{
-	return 0;
-}
-
-static stock Auth_GetAmxBase() 
-{
-	static amx_base = 0; // cached
-
-	if (amx_base == 0) 
-    {
-		new cod, dat;
-		#emit lctrl 0
-		#emit stor.s.pri cod
-		#emit lctrl 1
-		#emit stor.s.pri dat
-
-		// Get code section start address relative to data.
-		new code_start = cod - dat;
-
-		// Get address of Auth_Dummy().
-		new fn_addr;
-		#emit const.pri Auth_Dummy
-		#emit stor.s.pri fn_addr
-
-		// Get absolute address from the CALL instruction.
-		new fn_addr_reloc, call_addr;
-		Auth_Dummy();
-		#emit lctrl 6
-		#emit stor.s.pri call_addr
-		call_addr = call_addr - 12 + code_start;
-		#emit lref.s.pri call_addr
-		#emit stor.s.pri fn_addr_reloc
-
-		amx_base = fn_addr_reloc - fn_addr - cod;
-	}
-
-	return amx_base;
 }
 
 // ALS Controller
