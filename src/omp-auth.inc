@@ -39,6 +39,16 @@
     #define OMP_AUTH_BUFFER_SIZE 512
 #endif
 
+#if !defined OMP_AUTH_MIN_PASSWORD_INPUT
+    #define OMP_AUTH_MIN_PASSWORD_INPUT 6
+#endif
+
+// Error IDs
+#define OMP_AUTH_STRING_NULL    -1
+#define OMP_AUTH_LESS_PASSWORD  -2
+#define OMP_AUTH_WRONG_PASSWORD -3
+
+// Const
 static stock const OMP_AUTH_DIALOG_ID = 0x412B; // A+
 
 // Connection
@@ -62,13 +72,19 @@ static stock
 
 // States
 static stock
-    bool:Auth_g_sUserDataLoaded[MAX_PLAYERS];
+    bool:Auth_g_sUserDataLoaded[MAX_PLAYERS],
+    bool:Auth_g_sUserDataAuthed[MAX_PLAYERS];
 
 // Forward Internal
 forward Auth_OnLoadUser__(playerid);
 forward Auth_OnPrepareRegister__(playerid, hashid);
 forward Auth_OnRegisterUser__(playerid);
+forward Auth_OnVerifyLogin__(playerid, bool:success);
 
+// Macros
+#define IS_NULL(%0) ((%0[(%0[0])=='\1'])=='\0'||(%0[0])==ucharmax+1)
+
+// Initializations
 stock bool:Auth_Init({MySQL, DB}:connection, const table[] = "accounts", const idField[] = "id", const userNameField[] = "Username", const passwordField[] = "Password", tag = tagof(connection))
 {
     if (tag == tagof(MySQL:))
@@ -107,11 +123,79 @@ stock bool:Auth_Init({MySQL, DB}:connection, const table[] = "accounts", const i
     return false;
 }
 
+// Gets & Sets
 stock bool:Auth_IsUserDataLoaded(playerid)
 {
-    return (IsPlayerConnected(playerid) && Auth_g_sUserDataLoaded[playerid] == true);
+    if (!IsPlayerConnected(playerid))
+        return false;
+    
+    return (Auth_g_sUserDataLoaded[playerid] == true);
 }
 
+stock bool:Auth_IsUserLoggedIn(playerid)
+{
+    if (!IsPlayerConnected(playerid))
+        return false;
+    
+    return (Auth_g_sUserDataAuthed[playerid] == true);
+}
+
+stock bool:Auth_GetUserID(playerid, &uid)
+{
+    if (!Auth_IsUserDataLoaded(playerid))
+        return false;
+    
+    uid = Auth_g_sPlayerID[playerid];
+    return true;
+}
+
+stock bool:Auth_GetUserName(playerid, name[], len = sizeof(name))
+{
+    if (!Auth_IsUserDataLoaded(playerid))
+        return false;
+    
+    strcopy(name, Auth_g_sPlayerUserName[playerid], len);
+    return true;
+}
+
+stock bool:Auth_SetUserName(playerid, const name[], bool:sync = false)
+{
+    if (!Auth_IsUserDataLoaded(playerid))
+        return false;
+    
+    strcopy(Auth_g_sPlayerUserName[playerid], name, MAX_PLAYER_NAME);
+    
+    if (Auth_g_sConnType == 1)
+    {
+        new queryFormat[OMP_AUTH_BUFFER_SIZE];
+        mysql_format(Auth_g_sMySQLConn, queryFormat, sizeof(queryFormat), "UPDATE %s SET %s = '%s' WHERE %s = '%d'", Auth_g_sTableName, Auth_g_sUserNameField, name, Auth_g_sIDField, Auth_g_sPlayerID[playerid]);
+        mysql_tquery(Auth_g_sMySQLConn, queryFormat);
+    }
+    else
+    {
+        DB_FreeResultSet(DB_ExecuteQuery(Auth_g_sSQLiteConn, "UPDATE %s SET %s = '%s' WHERE %s = '%d'", Auth_g_sTableName, Auth_g_sUserNameField, name, Auth_g_sIDField, Auth_g_sPlayerID[playerid]));
+    }
+
+    if (sync == true)
+        SetPlayerName(playerid, name);
+
+    return true;
+}
+
+// Our reset state
+stock Auth_ResetData(playerid)
+{
+    new uid = Auth_g_sPlayerID[playerid] = 0;
+    
+    Auth_MemSet(Auth_g_sPlayerUserName[playerid], 0, sizeof(Auth_g_sPlayerUserName[]));
+    Auth_MemSet(Auth_g_sPlayerPassword[playerid], 0, sizeof(Auth_g_sPlayerPassword[]));
+    Auth_g_sUserDataLoaded[playerid] = false;
+
+    CallRemoteFunction(#OnUserAuthResetData, "ii", playerid, uid);
+    return 1;
+}
+
+// Controller
 stock bool:Auth_LoadUserData(playerid)
 {
     new playerName[MAX_PLAYER_NAME];
@@ -151,6 +235,7 @@ stock bool:Auth_LoadUserData(playerid)
     return false;
 }
 
+// GUI
 stock Auth_ShowLoginDialog(playerid, const title[], const body[], const button1[], const button2[], OPEN_MP_TAGS:...)
 {
     const static_args = 5;
@@ -233,19 +318,7 @@ stock Auth_ShowRegisterDialog(playerid, const title[], const body[], const butto
     return ShowPlayerDialog(playerid, OMP_AUTH_DIALOG_ID + 1, DIALOG_STYLE_PASSWORD, title, body, button1, button2);
 }
 
-// Our reset state
-stock Auth_ResetData(playerid)
-{
-    new uid = Auth_g_sPlayerID[playerid] = 0;
-    
-    Auth_MemSet(Auth_g_sPlayerUserName[playerid], 0, sizeof(Auth_g_sPlayerUserName[]));
-    Auth_MemSet(Auth_g_sPlayerPassword[playerid], 0, sizeof(Auth_g_sPlayerPassword[]));
-    Auth_g_sUserDataLoaded[playerid] = false;
-
-    CallRemoteFunction(#OnUserAuthResetData, "ii", playerid, uid);
-    return 1;
-}
-
+// Internals
 static stock Auth_handleMySQL(MySQL:connection, const table[], const idField[], const userNameField[], const passwordField[])
 {
     new queryFormat[OMP_AUTH_BUFFER_SIZE];
@@ -424,6 +497,7 @@ static stock Auth_HandleSQLite(DB:connection, const table[], const idField[], co
     }
 }
 
+// Public Internals
 public Auth_OnLoadUser__(playerid)
 {
     new rows;
@@ -485,14 +559,60 @@ public Auth_OnRegisterUser__(playerid)
     return 1;
 }
 
+public Auth_OnVerifyLogin__(playerid, bool:success)
+{
+    if (success)
+    {
+        // Reset now if it's not used.
+        Auth_MemSet(Auth_g_sPlayerPassword[playerid], 0, sizeof(Auth_g_sPlayerPassword[]));
+        CallRemoteFunction(#OnAuthUserLogin, "ii", playerid, Auth_g_sPlayerID[playerid]);
+        return 1;
+    }
+
+    CallRemoteFunction(#OnAuthUserLogin, "ii", playerid, OMP_AUTH_WRONG_PASSWORD);
+    return 1;
+}
+
+// Internal gui hooks
 public OnDialogResponse(playerid, dialogid, response, listitem, inputtext[])
 {
+    if (dialogid == OMP_AUTH_DIALOG_ID)
+    {
+        if (!response)
+        {
+            Auth_ResetData(playerid);
+            Kick(playerid);
+            return 1;
+        }
+
+        if (IS_NULL(inputtext))
+        {
+            CallRemoteFunction(#OnAuthUserRegistered, "ii", playerid, OMP_AUTH_STRING_NULL);
+            return 1;
+        }
+
+        bcrypt_verify(playerid, #Auth_OnVerifyLogin__, inputtext, Auth_g_sPlayerPassword[playerid]);
+        return 1;
+    }
+
     if (dialogid == OMP_AUTH_DIALOG_ID+1)
     {
         if (!response)
         {
             Auth_ResetData(playerid);
             Kick(playerid);
+            return 1;
+        }
+
+        if (IS_NULL(inputtext))
+        {
+            CallRemoteFunction(#OnAuthUserRegistered, "ii", playerid, OMP_AUTH_STRING_NULL);
+            return 1;
+        }
+
+        if (strlen(inputtext) < OMP_AUTH_MIN_PASSWORD_INPUT)
+        {
+            CallRemoteFunction(#OnAuthUserRegistered, "ii", playerid, OMP_AUTH_LESS_PASSWORD);
             return 1;
         }
 
@@ -508,8 +628,7 @@ public OnDialogResponse(playerid, dialogid, response, listitem, inputtext[])
     #endif
 }
 
-
-// Internal functions for various reasons.
+// Deep Internal functions for various reasons
 static stock Auth_MemSet(variable[], cells, value) 
 {
     new address;
@@ -696,6 +815,7 @@ static stock Auth_GetAmxBase()
 	return amx_base;
 }
 
+// ALS Controller
 #if defined _ALS_OnDialogResponse
     #undef OnDialogResponse
 #else
@@ -704,6 +824,7 @@ static stock Auth_GetAmxBase()
 
 #define OnDialogResponse AU_OnDialogResponse
 
+// Forwards
 #if defined OnUserAuthDataLoaded
     forward OnUserAuthDataLoaded(playerid, uid);
 #endif
@@ -714,4 +835,8 @@ static stock Auth_GetAmxBase()
 
 #if defined OnAuthUserRegistered
     forward OnAuthUserRegistered(playerid, uid);
+#endif
+
+#if defined OnAuthUserLogin
+    forward OnAuthUserLogin(playerid, uid);
 #endif
