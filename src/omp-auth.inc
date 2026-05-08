@@ -792,11 +792,7 @@ public OnUserAuthDataLoaded(playerid, uid)
         ClearMessageChat(playerid);
         Auth_ShowLoginDialog(playerid, OMP_AUTH_LOGIN_DIALOG_TITLE, OMP_AUTH_LOGIN_DIALOG_BODY, "Login", "Exit", OMP_AUTH_MAX_ATTEMPT);
     }
-    #if defined AU_OnUserAuthDataLoaded
-        return AU_OnUserAuthDataLoaded(playerid, uid);
-    #else
-        return 1;
-    #endif
+    return 1;
 }
 
 public OnAuthUserLogin(playerid, uid, OMP_AUTH_ERROR:error)
@@ -862,14 +858,6 @@ public OnUserAuthResetData(playerid, uid)
     #endif
 }
 
-#if defined _ALS_OnUserAuthDataLoaded
-    #undef OnUserAuthDataLoaded
-#else
-    #define _ALS_OnUserAuthDataLoaded
-#endif
-
-#define OnUserAuthDataLoaded AU_OnUserAuthDataLoaded
-
 #if defined _ALS_OnAuthUserLogin
     #undef OnAuthUserLogin
 #else
@@ -893,11 +881,6 @@ public OnUserAuthResetData(playerid, uid)
 #endif
 
 #define OnUserAuthResetData AU_OnUserAuthResetData
-
-
-#if defined AU_OnUserAuthDataLoaded
-    forward AU_OnUserAuthDataLoaded(playerid, uid);
-#endif
 
 #if defined AU_OnAuthUserRegister
     forward AU_OnAuthUserRegister(playerid, uid, OMP_AUTH_ERROR:error);
