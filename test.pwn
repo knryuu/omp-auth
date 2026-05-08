@@ -1,8 +1,9 @@
-
 #include <open.mp>
 #include <a_mysql>
 
 #define OMP_AUTH_USE_SQLITE
+#define OMP_AUTH_AUTO_HANDLE
+
 #include "src\omp-auth.inc"
 
 #if defined OMP_AUTH_USE_SQLITE
@@ -43,9 +44,10 @@ public OnPlayerConnect(playerid)
     return 1;
 }
 
+#if !defined OMP_AUTH_AUTO_HANDLE
 public OnUserAuthDataLoaded(playerid, uid)
 {
-    if (!uid)
+    if (uid == 0)
     {
         SendClientMessage(playerid, 0xFFFFFFAA, "Your account is not exists in our database!");
         Auth_ShowRegisterDialog(playerid, "{FFFFFF}Register Dialog", "{FFFFFF}Welcome! Please insert password below to yap", "Register", "Exit");
@@ -58,15 +60,15 @@ public OnUserAuthDataLoaded(playerid, uid)
     return 1;
 }
 
-public OnAuthUserRegistered(playerid, uid)
+public OnAuthUserRegistered(playerid, uid, OMP_AUTH_ERROR:error)
 {
-    if (uid == OMP_AUTH_STRING_NULL)
+    if (error == OMP_AUTH_EMPTY_PASSWORD)
     {
         Auth_ShowRegisterDialog(playerid, "{FFFFFF}Register Dialog", "{FF0000}ERROR: Invalid password specified, please try again!\n\n{FFFFFF}Welcome! Insert password below to yap", "Register", "Exit");
         return 1;
     }
 
-    if (uid == OMP_AUTH_LESS_PASSWORD)
+    if (error == OMP_AUTH_MIN_PASSWORD)
     {
         Auth_ShowRegisterDialog(playerid, "{FFFFFF}Register Dialog", "{FF0000}ERROR: Password must not be less than "#OMP_AUTH_MIN_PASSWORD_INPUT"!\n\n{FFFFFF}Welcome! Insert password below to yap", "Register", "Exit");
         return 1;
@@ -77,15 +79,15 @@ public OnAuthUserRegistered(playerid, uid)
     return 1;
 }
 
-public OnAuthUserLogin(playerid, uid)
+public OnAuthUserLogin(playerid, uid, OMP_AUTH_ERROR:error)
 {
-    if (uid == OMP_AUTH_STRING_NULL)
+    if (error == OMP_AUTH_EMPTY_PASSWORD)
     {
         Auth_ShowLoginDialog(playerid, "{FFFFFF}Login Dialog", "{FF0000}ERROR: Invalid password specified, please try again!\n\n{FFFFFF}Welcome back! Insert password below to yap", "Login", "Exit");
         return 1;
     }
 
-    if (uid == OMP_AUTH_WRONG_PASSWORD)
+    if (error == OMP_AUTH_WRONG_PASSWORD)
     {
         Auth_ShowLoginDialog(playerid, "{FFFFFF}Login Dialog", "{FF0000}ERROR: Wrong password, try again!\n\n{FFFFFF}Welcome back! Insert password below to yap", "Login", "Exit");
         return 1;
@@ -94,3 +96,4 @@ public OnAuthUserLogin(playerid, uid)
     SendClientMessage(playerid, 0xFFFFFFAA, "User joined (UID: %d)", uid);
     return 1;
 }
+#endif

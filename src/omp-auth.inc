@@ -1,5 +1,5 @@
 /*
-    omp-auth v0.1.0-rc
+    omp-auth v1.0.0
     Created with <3 by knryuu.
 
     omp-auth is authentication system for your gamemodes so you can 
@@ -43,11 +43,6 @@
     #define OMP_AUTH_MIN_PASSWORD_INPUT 6
 #endif
 
-// Error IDs
-#define OMP_AUTH_STRING_NULL    -1
-#define OMP_AUTH_LESS_PASSWORD  -2
-#define OMP_AUTH_WRONG_PASSWORD -3
-
 // Const
 static stock const OMP_AUTH_DIALOG_ID = 0x412B; // A+
 
@@ -74,6 +69,18 @@ static stock
 static stock
     bool:Auth_g_sUserDataLoaded[MAX_PLAYERS],
     bool:Auth_g_sUserDataAuthed[MAX_PLAYERS];
+
+// Error IDs
+#define OMP_AUTH_ERROR: __TAG(OMP_AUTH_ERROR):
+enum OMP_AUTH_ERROR:__OMP_AUTH_ERROR
+{
+    OMP_AUTH_NO_ERROR = 0,
+    OMP_AUTH_EMPTY_PASSWORD = 1,
+    OMP_AUTH_MIN_PASSWORD,
+    OMP_AUTH_WRONG_PASSWORD,
+    OMP_AUTH_USER_EXITED,
+    OMP_AUTH_FAIL_REGISTER
+};
 
 // Forward Internal
 forward Auth_OnLoadUser__(playerid);
@@ -190,6 +197,7 @@ stock Auth_ResetData(playerid)
     Auth_MemSet(Auth_g_sPlayerUserName[playerid], 0, sizeof(Auth_g_sPlayerUserName[]));
     Auth_MemSet(Auth_g_sPlayerPassword[playerid], 0, sizeof(Auth_g_sPlayerPassword[]));
     Auth_g_sUserDataLoaded[playerid] = false;
+    Auth_g_sUserDataAuthed[playerid] = false;
 
     CallRemoteFunction(#OnUserAuthResetData, "ii", playerid, uid);
     return 1;
@@ -541,13 +549,13 @@ public Auth_OnPrepareRegister__(playerid, hashid)
             Auth_g_sPlayerID[playerid] = Auth_GetSQLiteLastInsertID();
             DB_FreeResultSet(result);
 
-            CallRemoteFunction(#OnAuthUserRegistered, "ii", playerid, Auth_g_sPlayerID[playerid]);
+            CallRemoteFunction(#OnAuthUserRegister, "iii", playerid, Auth_g_sPlayerID[playerid], OMP_AUTH_NO_ERROR);
         }
         else
         {
             Auth_ResetData(playerid);
             printf("[omp-auth error]: Failed to insert user data to %s", Auth_g_sTableName);
-            CallRemoteFunction(#OnAuthUserRegistered, "ii", playerid, 0);
+            CallRemoteFunction(#OnAuthUserRegister, "iii", playerid, 0, OMP_AUTH_FAIL_REGISTER);
         }
     }
 
@@ -557,7 +565,7 @@ public Auth_OnPrepareRegister__(playerid, hashid)
 public Auth_OnRegisterUser__(playerid)
 {
     Auth_g_sPlayerID[playerid] = cache_insert_id();
-    CallRemoteFunction(#OnAuthUserRegistered, "ii", playerid, Auth_g_sPlayerID[playerid]);
+    CallRemoteFunction(#OnAuthUserRegister, "iii", playerid, Auth_g_sPlayerID[playerid], OMP_AUTH_NO_ERROR);
     return 1;
 }
 
@@ -567,11 +575,11 @@ public Auth_OnVerifyLogin__(playerid, bool:success)
     {
         // Reset now if it's not used.
         Auth_MemSet(Auth_g_sPlayerPassword[playerid], 0, sizeof(Auth_g_sPlayerPassword[]));
-        CallRemoteFunction(#OnAuthUserLogin, "ii", playerid, Auth_g_sPlayerID[playerid]);
+        CallRemoteFunction(#OnAuthUserLogin, "iii", playerid, Auth_g_sPlayerID[playerid], OMP_AUTH_NO_ERROR);
         return 1;
     }
 
-    CallRemoteFunction(#OnAuthUserLogin, "ii", playerid, OMP_AUTH_WRONG_PASSWORD);
+    CallRemoteFunction(#OnAuthUserLogin, "iii", playerid, Auth_g_sPlayerID[playerid], OMP_AUTH_WRONG_PASSWORD);
     return 1;
 }
 
@@ -589,7 +597,7 @@ public OnDialogResponse(playerid, dialogid, response, listitem, inputtext[])
 
         if (IS_NULL(inputtext))
         {
-            CallRemoteFunction(#OnAuthUserLogin, "ii", playerid, OMP_AUTH_STRING_NULL);
+            CallRemoteFunction(#OnAuthUserLogin, "iii", playerid, Auth_g_sPlayerID[playerid], OMP_AUTH_EMPTY_PASSWORD);
             return 1;
         }
 
@@ -608,13 +616,13 @@ public OnDialogResponse(playerid, dialogid, response, listitem, inputtext[])
 
         if (IS_NULL(inputtext))
         {
-            CallRemoteFunction(#OnAuthUserRegistered, "ii", playerid, OMP_AUTH_STRING_NULL);
+            CallRemoteFunction(#OnAuthUserRegister, "iii", playerid, Auth_g_sPlayerID[playerid], OMP_AUTH_EMPTY_PASSWORD);
             return 1;
         }
 
         if (strlen(inputtext) < OMP_AUTH_MIN_PASSWORD_INPUT)
         {
-            CallRemoteFunction(#OnAuthUserRegistered, "ii", playerid, OMP_AUTH_LESS_PASSWORD);
+            CallRemoteFunction(#OnAuthUserRegister, "iii", playerid, Auth_g_sPlayerID[playerid], OMP_AUTH_MIN_PASSWORD);
             return 1;
         }
 
@@ -627,6 +635,17 @@ public OnDialogResponse(playerid, dialogid, response, listitem, inputtext[])
         return AU_OnDialogResponse(playerid, dialogid, response, listitem, inputtext);
     #else
         return 0;
+    #endif
+}
+
+public OnPlayerDisconnect(playerid, reason)
+{
+    Auth_ResetData(playerid);
+
+    #if defined AU_OnPlayerDisconnect
+        return AU_OnPlayerDisconnect(playerid, reason);
+    #else
+        return 1;
     #endif
 }
 
@@ -682,9 +701,25 @@ static stock Auth_RawMemSet(address, cells, value)
     #define _ALS_OnDialogResponse
 #endif
 
-#define OnDialogResponse AU_OnDialogResponse
+#define OnPlayerDisconnect AU_OnPlayerDisconnect
+
+#if defined _ALS_OnPlayerDisconnect
+    #undef OnPlayerDisconnect
+#else
+    #define _ALS_OnPlayerDisconnect
+#endif
+
+#define OnPlayerDisconnect AU_OnPlayerDisconnect
 
 // Forwards
+#if defined AU_OnDialogResponse
+    forward AU_OnDialogResponse(playerid, dialogid, response, listitem, inputtext[]);
+#endif
+
+#if defined AU_OnPlayerDisconnect
+    forward AU_OnPlayerDisconnect(playerid, reason);
+#endif
+
 #if defined OnUserAuthDataLoaded
     forward OnUserAuthDataLoaded(playerid, uid);
 #endif
@@ -693,10 +728,185 @@ static stock Auth_RawMemSet(address, cells, value)
     forward OnUserAuthResetData(playerid, uid);
 #endif
 
-#if defined OnAuthUserRegistered
-    forward OnAuthUserRegistered(playerid, uid);
+#if defined OnAuthUserRegister
+    forward OnAuthUserRegister(playerid, uid, OMP_AUTH_ERROR:error);
 #endif
 
 #if defined OnAuthUserLogin
-    forward OnAuthUserLogin(playerid, uid);
+    forward OnAuthUserLogin(playerid, uid, OMP_AUTH_ERROR:error);
+#endif
+
+// Automations
+#if !defined OMP_AUTH_AUTO_HANDLE
+    #endinput
+#endif
+
+#if !defined OMP_AUTH_MAX_ATTEMPT
+    #define OMP_AUTH_MAX_ATTEMPT 3
+#endif
+
+#if !defined OMP_AUTH_LOGIN_DIALOG_TITLE
+    #define OMP_AUTH_LOGIN_DIALOG_TITLE "{FFFFFF}User Login"
+#endif
+
+#if !defined OMP_AUTH_LOGIN_DIALOG_BODY
+    #define OMP_AUTH_LOGIN_DIALOG_BODY "{FFFFFF}Welcome back to our server! Please insert your password below in order to login\n{acacac}(NOTE: You only have %d chances before getting kicked from the server)"
+#endif
+
+#if !defined OMP_AUTH_REGISTER_DIALOG_TITLE
+    #define OMP_AUTH_REGISTER_DIALOG_TITLE "{FFFFFF}User Register"
+#endif
+
+#if !defined OMP_AUTH_REGISTER_DIALOG_BODY
+    #define OMP_AUTH_REGISTER_DIALOG_BODY "{FFFFFF}Welcome to our server! Please insert your password below in order to register\n{acacac}(NOTE: The minimum password requirement is %d)"
+#endif
+
+#if !defined OMP_AUTH_EMPTY_MESSAGE
+    #define OMP_AUTH_EMPTY_MESSAGE  "{FF0000}ERROR: Invalid input specified, please try again!"
+#endif
+
+#if !defined OMP_AUTH_FAIL_MESSAGE
+    #define OMP_AUTH_FAIL_MESSAGE  "{FF0000}ERROR: Invalid password specified, please try again!"
+#endif
+
+#if !defined OMP_AUTH_REQ_MESSAGE
+    #define OMP_AUTH_REQ_MESSAGE   "{FF0000}ERROR: Your password is less than the requirement, please try again!"
+#endif
+
+static Account_g_sAuthAttempt[MAX_PLAYERS] = {0, ...};
+
+stock void:ClearMessageChat(playerid, amount = 10)
+{
+    for (new i = 0; i < amount; i ++) SendClientMessage(playerid, -1, " ");
+}
+
+public OnUserAuthDataLoaded(playerid, uid)
+{
+    if (uid == 0)
+    {
+        ClearMessageChat(playerid);
+        Auth_ShowRegisterDialog(playerid, OMP_AUTH_REGISTER_DIALOG_TITLE, OMP_AUTH_REGISTER_DIALOG_BODY, "Register", "Exit", OMP_AUTH_MIN_PASSWORD_INPUT);
+    }
+    else
+    {
+        ClearMessageChat(playerid);
+        Auth_ShowLoginDialog(playerid, OMP_AUTH_LOGIN_DIALOG_TITLE, OMP_AUTH_LOGIN_DIALOG_BODY, "Login", "Exit", OMP_AUTH_MAX_ATTEMPT);
+    }
+    #if defined AU_OnUserAuthDataLoaded
+        return AU_OnUserAuthDataLoaded(playerid, uid);
+    #else
+        return 1;
+    #endif
+}
+
+public OnAuthUserLogin(playerid, uid, OMP_AUTH_ERROR:error)
+{
+    if (error == OMP_AUTH_EMPTY_PASSWORD)
+    {
+        Auth_ShowLoginDialog(playerid, OMP_AUTH_LOGIN_DIALOG_TITLE, OMP_AUTH_EMPTY_MESSAGE"\n\n"OMP_AUTH_LOGIN_DIALOG_BODY, "Login", "Exit", OMP_AUTH_MAX_ATTEMPT);
+        return 1;
+    }
+
+    if (error == OMP_AUTH_WRONG_PASSWORD)
+    {
+        if (++ Account_g_sAuthAttempt[playerid] >= 3)
+        {
+            Kick(playerid);
+            return 0;
+        }
+
+        Auth_ShowLoginDialog(playerid, OMP_AUTH_LOGIN_DIALOG_TITLE, OMP_AUTH_FAIL_MESSAGE"\n\n"OMP_AUTH_LOGIN_DIALOG_BODY, "Login", "Exit", OMP_AUTH_MAX_ATTEMPT);
+        return 1;
+    }
+
+    Account_g_sAuthAttempt[playerid] = 0;
+
+    #if defined AU_OnAuthUserLogin
+        return AU_OnAuthUserLogin(playerid, uid, error);
+    #else
+        return 1;
+    #endif
+}
+
+public OnAuthUserRegister(playerid, uid, OMP_AUTH_ERROR:error)
+{
+    if (error == OMP_AUTH_EMPTY_PASSWORD)
+    {
+        Auth_ShowRegisterDialog(playerid, OMP_AUTH_REGISTER_DIALOG_TITLE, OMP_AUTH_EMPTY_MESSAGE"\n\n"OMP_AUTH_REGISTER_DIALOG_BODY, "Register", "Exit", OMP_AUTH_MIN_PASSWORD_INPUT);
+        return 1;
+    }
+
+    if (error == OMP_AUTH_MIN_PASSWORD)
+    {
+        Auth_ShowRegisterDialog(playerid, OMP_AUTH_REGISTER_DIALOG_TITLE, OMP_AUTH_REQ_MESSAGE"\n\n"OMP_AUTH_REGISTER_DIALOG_BODY, "Register", "Exit", OMP_AUTH_MIN_PASSWORD_INPUT);
+        return 1;
+    }
+
+    Auth_ShowLoginDialog(playerid, OMP_AUTH_LOGIN_DIALOG_TITLE, OMP_AUTH_LOGIN_DIALOG_BODY, "Login", "Exit", OMP_AUTH_MAX_ATTEMPT);
+
+    #if defined AU_OnAuthUserRegister
+        return AU_OnAuthUserRegister(playerid, uid, error);
+    #else
+        return 1;
+    #endif
+}
+
+public OnUserAuthResetData(playerid, uid)
+{
+    Account_g_sAuthAttempt[playerid] = 0;
+ 
+    #if defined AU_OnAuthUserRegister
+        return AU_OnUserAuthResetData(playerid, uid);
+    #else
+        return 1;
+    #endif
+}
+
+#if defined _ALS_OnUserAuthDataLoaded
+    #undef OnUserAuthDataLoaded
+#else
+    #define _ALS_OnUserAuthDataLoaded
+#endif
+
+#define OnUserAuthDataLoaded AU_OnUserAuthDataLoaded
+
+#if defined _ALS_OnAuthUserLogin
+    #undef OnAuthUserLogin
+#else
+    #define _ALS_OnAuthUserLogin
+#endif
+
+#define OnAuthUserLogin AU_OnAuthUserLogin
+
+#if defined _ALS_OnAuthUserRegister
+    #undef OnAuthUserRegister
+#else
+    #define _ALS_OnAuthUserRegister
+#endif
+
+#define OnAuthUserRegister AU_OnAuthUserRegister
+
+#if defined _ALS_OnUserAuthResetData
+    #undef OnUserAuthResetData
+#else
+    #define _ALS_OnUserAuthResetData
+#endif
+
+#define OnUserAuthResetData AU_OnUserAuthResetData
+
+
+#if defined AU_OnUserAuthDataLoaded
+    forward AU_OnUserAuthDataLoaded(playerid, uid);
+#endif
+
+#if defined AU_OnAuthUserRegister
+    forward AU_OnAuthUserRegister(playerid, uid, OMP_AUTH_ERROR:error);
+#endif
+
+#if defined AU_OnAuthUserLogin
+    forward AU_OnAuthUserLogin(playerid, uid, OMP_AUTH_ERROR:error);
+#endif
+
+#if defined AU_OnUserAuthResetData
+    forward AU_OnUserAuthResetData(playerid, uid);
 #endif
