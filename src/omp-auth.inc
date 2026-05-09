@@ -1,5 +1,5 @@
 /*
-    omp-auth v1.0.0
+    omp-auth v1.0.1
     Created with <3 by knryuu.
 
     omp-auth is authentication system for your gamemodes so you can 
@@ -172,6 +172,7 @@ stock bool:Auth_SetUserName(playerid, const name[], bool:sync = false)
     
     strcopy(Auth_g_sPlayerUserName[playerid], name, MAX_PLAYER_NAME);
     
+#if defined mysql_included
     if (Auth_g_sConnType == 1)
     {
         new queryFormat[OMP_AUTH_BUFFER_SIZE];
@@ -182,6 +183,9 @@ stock bool:Auth_SetUserName(playerid, const name[], bool:sync = false)
     {
         DB_FreeResultSet(DB_ExecuteQuery(Auth_g_sSQLiteConn, "UPDATE %s SET %s = '%s' WHERE %s = '%d'", Auth_g_sTableName, Auth_g_sUserNameField, name, Auth_g_sIDField, Auth_g_sPlayerID[playerid]));
     }
+#else
+    DB_FreeResultSet(DB_ExecuteQuery(Auth_g_sSQLiteConn, "UPDATE %s SET %s = '%s' WHERE %s = '%d'", Auth_g_sTableName, Auth_g_sUserNameField, name, Auth_g_sIDField, Auth_g_sPlayerID[playerid]));
+#endif
 
     if (sync == true)
         SetPlayerName(playerid, name);
@@ -208,7 +212,8 @@ stock bool:Auth_LoadUserData(playerid)
 {
     new playerName[MAX_PLAYER_NAME];
     GetPlayerName(playerid, playerName, sizeof(playerName));
-
+    
+#if defined mysql_included
     if (Auth_g_sConnType == 1)
     {
         new queryFormat[OMP_AUTH_BUFFER_SIZE];
@@ -239,6 +244,28 @@ stock bool:Auth_LoadUserData(playerid)
             return true;
         }
     }
+#else
+    new DBResult:result = DB_ExecuteQuery(Auth_g_sSQLiteConn, "SELECT %s, %s, %s FROM %s WHERE %s = '%q' LIMIT 1", Auth_g_sIDField, Auth_g_sUserNameField, Auth_g_sPasswordField, Auth_g_sTableName, Auth_g_sUserNameField, playerName);
+    
+    if (result)
+    {
+        if (!DB_GetRowCount(result))
+        {
+            Auth_g_sUserDataLoaded[playerid] = false;
+            CallRemoteFunction(#OnUserAuthDataLoaded, "ii", playerid, 0);
+            return true;
+        }
+
+        Auth_g_sPlayerID[playerid] = DB_GetFieldInt(result, 0);
+        DB_GetFieldString(result, 1, Auth_g_sPlayerUserName[playerid], MAX_PLAYER_NAME);
+        DB_GetFieldString(result, 2, Auth_g_sPlayerPassword[playerid], BCRYPT_HASH_LENGTH);
+        DB_FreeResultSet(result);
+
+        Auth_g_sUserDataLoaded[playerid] = true;
+        CallRemoteFunction(#OnUserAuthDataLoaded, "ii", playerid, Auth_g_sPlayerID[playerid]);
+        return true;
+    }
+#endif
 
     return false;
 }
@@ -506,6 +533,7 @@ static stock Auth_HandleSQLite(DB:connection, const table[], const idField[], co
 }
 
 // Public Internals
+#if defined mysql_included
 public Auth_OnLoadUser__(playerid)
 {
     new rows;
@@ -527,6 +555,7 @@ public Auth_OnLoadUser__(playerid)
     CallRemoteFunction(#OnUserAuthDataLoaded, "ii", playerid, Auth_g_sPlayerID[playerid]);
     return 1;
 }
+#endif
 
 public Auth_OnPrepareRegister__(playerid, hashid)
 {
@@ -534,6 +563,7 @@ public Auth_OnPrepareRegister__(playerid, hashid)
     bcrypt_get_hash(Auth_g_sPlayerPassword[playerid], BCRYPT_HASH_LENGTH);
     GetPlayerName(playerid, Auth_g_sPlayerUserName[playerid], MAX_PLAYER_NAME);
 
+#if defined mysql_included
     if (Auth_g_sConnType == 1)
     {
         new queryFormat[OMP_AUTH_BUFFER_SIZE];
@@ -558,16 +588,35 @@ public Auth_OnPrepareRegister__(playerid, hashid)
             CallRemoteFunction(#OnAuthUserRegister, "iii", playerid, 0, OMP_AUTH_FAIL_REGISTER);
         }
     }
+#else
+    new DBResult:result = DB_ExecuteQuery(Auth_g_sSQLiteConn, "INSERT INTO %s (%s, %s) VALUES ('%q', '%q')", Auth_g_sTableName, Auth_g_sUserNameField, Auth_g_sPasswordField, Auth_g_sPlayerUserName[playerid], Auth_g_sPlayerPassword[playerid]);
+    
+    if (result)
+    {
+        Auth_g_sPlayerID[playerid] = Auth_GetSQLiteLastInsertID();
+        DB_FreeResultSet(result);
+
+        CallRemoteFunction(#OnAuthUserRegister, "iii", playerid, Auth_g_sPlayerID[playerid], OMP_AUTH_NO_ERROR);
+    }
+    else
+    {
+        Auth_ResetData(playerid);
+        printf("[omp-auth error]: Failed to insert user data to %s", Auth_g_sTableName);
+        CallRemoteFunction(#OnAuthUserRegister, "iii", playerid, 0, OMP_AUTH_FAIL_REGISTER);
+    }
+#endif
 
     return 1;
 }
 
+#if defined mysql_included
 public Auth_OnRegisterUser__(playerid)
 {
     Auth_g_sPlayerID[playerid] = cache_insert_id();
     CallRemoteFunction(#OnAuthUserRegister, "iii", playerid, Auth_g_sPlayerID[playerid], OMP_AUTH_NO_ERROR);
     return 1;
 }
+#endif
 
 public Auth_OnVerifyLogin__(playerid, bool:success)
 {
@@ -792,11 +841,7 @@ public OnUserAuthDataLoaded(playerid, uid)
         ClearMessageChat(playerid);
         Auth_ShowLoginDialog(playerid, OMP_AUTH_LOGIN_DIALOG_TITLE, OMP_AUTH_LOGIN_DIALOG_BODY, "Login", "Exit", OMP_AUTH_MAX_ATTEMPT);
     }
-    #if defined AU_OnUserAuthDataLoaded
-        return AU_OnUserAuthDataLoaded(playerid, uid);
-    #else
-        return 1;
-    #endif
+    return 1;
 }
 
 public OnAuthUserLogin(playerid, uid, OMP_AUTH_ERROR:error)
@@ -855,20 +900,12 @@ public OnUserAuthResetData(playerid, uid)
 {
     Account_g_sAuthAttempt[playerid] = 0;
  
-    #if defined AU_OnAuthUserRegister
+    #if defined AU_OnUserAuthResetData
         return AU_OnUserAuthResetData(playerid, uid);
     #else
         return 1;
     #endif
 }
-
-#if defined _ALS_OnUserAuthDataLoaded
-    #undef OnUserAuthDataLoaded
-#else
-    #define _ALS_OnUserAuthDataLoaded
-#endif
-
-#define OnUserAuthDataLoaded AU_OnUserAuthDataLoaded
 
 #if defined _ALS_OnAuthUserLogin
     #undef OnAuthUserLogin
@@ -893,11 +930,6 @@ public OnUserAuthResetData(playerid, uid)
 #endif
 
 #define OnUserAuthResetData AU_OnUserAuthResetData
-
-
-#if defined AU_OnUserAuthDataLoaded
-    forward AU_OnUserAuthDataLoaded(playerid, uid);
-#endif
 
 #if defined AU_OnAuthUserRegister
     forward AU_OnAuthUserRegister(playerid, uid, OMP_AUTH_ERROR:error);

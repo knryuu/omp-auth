@@ -64,7 +64,7 @@ public OnUserAuthDataLoaded(playerid, uid)
 }
 
 // Called after a registration attempt
-public OnAuthUserRegistered(playerid, uid, OMP_AUTH_ERROR:error)
+public OnAuthUserRegister(playerid, uid, OMP_AUTH_ERROR:error)
 {
     if (error == OMP_AUTH_NO_ERROR)
     {
@@ -245,7 +245,7 @@ These must be implemented in your gamemode:
 - **`OnUserAuthDataLoaded(playerid, uid)`**  
   Called after `Auth_LoadUserData` completes. `uid` = 0 if no account exists.
 
-- **`OnAuthUserRegistered(playerid, uid, OMP_AUTH_ERROR:error)`**  
+- **`OnAuthUserRegister(playerid, uid, OMP_AUTH_ERROR:error)`**  
   Called after a registration attempt. Check `error` against the enum below.
 
 - **`OnAuthUserLogin(playerid, uid, OMP_AUTH_ERROR:error)`**  
